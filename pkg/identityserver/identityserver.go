@@ -24,6 +24,7 @@ import (
 	"go.thethings.network/lorawan-stack/pkg/auth/rights"
 	"go.thethings.network/lorawan-stack/pkg/cluster"
 	"go.thethings.network/lorawan-stack/pkg/component"
+	"go.thethings.network/lorawan-stack/pkg/identityserver/basicstation"
 	"go.thethings.network/lorawan-stack/pkg/identityserver/store"
 	"go.thethings.network/lorawan-stack/pkg/oauth"
 	"go.thethings.network/lorawan-stack/pkg/redis"
@@ -73,6 +74,7 @@ type IdentityServer struct {
 	config *Config
 	db     *gorm.DB
 	oauth  oauth.Server
+	cups   *basicstation.CUPSServer
 
 	redis *redis.Client
 }
@@ -126,6 +128,20 @@ func New(c *component.Component, config *Config) (is *IdentityServer, err error)
 		OAuthStore:       store.GetOAuthStore(is.db),
 	}, is.config.OAuth)
 
+	cupsOpts := []basicstation.Option{
+		basicstation.WithFallbackAuth(is.Component.WithClusterAuth()),
+	}
+	if tlsConfig, err := is.Component.GetBaseConfig(is.Component.Context()).TLS.Config(is.Component.Context()); err == nil {
+		cupsOpts = append(cupsOpts, basicstation.WithRootCAs(tlsConfig.RootCAs))
+	}
+
+	cupsLoopback := is.Component.LoopbackConn()
+	is.cups = basicstation.NewCUPSServer(
+		ttnpb.NewGatewayRegistryClient(cupsLoopback),
+		ttnpb.NewGatewayAccessClient(cupsLoopback),
+		cupsOpts...,
+	)
+
 	c.AddContextFiller(func(ctx context.Context) context.Context {
 		ctx = is.withRequestAccessCache(ctx)
 		ctx = rights.NewContextWithFetcher(ctx, is)
@@ -155,6 +171,7 @@ func New(c *component.Component, config *Config) (is *IdentityServer, err error)
 
 	c.RegisterGRPC(is)
 	c.RegisterWeb(is.oauth)
+	c.RegisterWeb(is.cups)
 
 	return is, nil
 }
