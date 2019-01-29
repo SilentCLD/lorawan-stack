@@ -15,6 +15,7 @@
 import Marshaler from '../util/marshaler'
 import Device from '../entity/device'
 import Application from '../entity/application'
+import ApiKeys from './api-keys'
 
 /**
  * Applications Class provides an abstraction on all applications and manages
@@ -35,6 +36,12 @@ class Applications {
       ? app => new Application(this, app, false)
       : undefined
 
+    this.ApiKeys = new ApiKeys(api.ApplicationAccess, {
+      list: 'application_id',
+      create: 'application_ids.application_id',
+      update: 'application_ids.application_id',
+    })
+
     this.getAll = this.getAll.bind(this)
     this.getById = this.getById.bind(this)
     this.getByOrganization = this.getByOrganization.bind(this)
@@ -50,6 +57,7 @@ class Applications {
 
   async getAll (params) {
     const result = await this._api.ApplicationRegistry.List({ query: params })
+
     return Marshaler.unwrapApplications(
       result,
       this._applicationTransform
@@ -155,7 +163,7 @@ class Applications {
         return new Device(result, api)
       },
       async getApiKeys () {
-        return api.ApplicationAccess.ListAPIKeys({ application_id: id })
+        return api.ApplicationAccess.ListAPIKeys({ route: { application_id: id }})
       },
       async getCollaborators () {
         return api.ApplicationAccess.ListCollaborators({ application_id: id })
