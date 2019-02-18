@@ -29,15 +29,19 @@ import Button from '../../../components/button'
 import Spinner from '../../../components/spinner'
 import ModalButton from '../../../components/button/modal-button'
 import Message from '../../../lib/components/message'
+import diff from '../../../lib/diff'
 
-import { getApplicationsRightsList } from '../../store/actions/applications'
+import { getApplicationApiKey } from '../../store/actions/application'
+import api from '../../api'
 
+import FieldGroup from '../../../components/field/group'
 import style from './application-access-edit.styl'
 
 const m = defineMessages({
   deleteKey: 'Delete Key',
   modalWarning:
-    'Are you sure you want to delete "{keyName}"? Deleting an application access key cannot be undone!',
+    'Are you sure you want to delete "{keyName}"? Deleting an application access apiKey cannot be undone!',
+  rightsValidation: 'At least one right should be selected',
 })
 
 const validationSchema = Yup.object().shape({
@@ -45,18 +49,34 @@ const validationSchema = Yup.object().shape({
     .min(2, sharedMessages.validateTooShort)
     .max(50, sharedMessages.validateTooLong)
     .required(sharedMessages.validateRequired),
+  rights: Yup.object().test(
+    'rights',
+    m.rightsValidation,
+    values => Object.values(values).reduce((acc, curr) => acc || curr, false)
+  ),
 })
 
 @connect(function ({ apiKeys, rights }, props) {
   const { appId, apiKeyId } = props.match.params
 
+  const keysFetching = apiKeys.applications.fetching
+  const rightsFetching = rights.applications.fetching
+  const keysError = apiKeys.applications.error
+  const rightsError = rights.applications.error
+
+  const appKeys = apiKeys.applications[appId]
+  const apiKey = appKeys ? appKeys.keys.find(k => k.id === apiKeyId) : undefined
+
+  const appRights = rights.applications
+  const rs = appRights ? appRights.rights : []
+
   return {
-    apiKeyId,
+    keyId: apiKeyId,
     appId,
-    apiKey: apiKeys.applications[appId].keys.find(k => k.id === apiKeyId),
-    applicationsRights: rights.applications.rights,
-    fetching: rights.applications.fetching,
-    error: rights.applications.error,
+    apiKey,
+    rights: rs,
+    fetching: keysFetching || rightsFetching,
+    error: keysError || rightsError,
   }
 })
 @withBreadcrumb('apps.single.access.single', function (props) {
@@ -72,30 +92,55 @@ const validationSchema = Yup.object().shape({
 })
 @bind
 export default class ApplicationAccessEdit extends React.Component {
-  componentDidMount () {
-    const { dispatch } = this.props
 
-    dispatch(getApplicationsRightsList())
+  state = {
+    error: '',
   }
 
-  handleSubmit () { }
+  componentDidMount () {
+    const { dispatch, appId } = this.props
+
+    dispatch(getApplicationApiKey(appId))
+  }
+
+  async handleSubmit (values, { setSubmitting, resetForm }) {
+    const { name, rights } = values
+    const { appId, apiKey } = this.props
+
+    const changed = diff({ name: apiKey.name }, { name })
+    changed.rights = Object.keys(rights).filter(r => rights[r])
+
+    await this.setState({ error: '' })
+
+    try {
+      await api.application.apiKeys.update(
+        appId,
+        apiKey.id,
+        changed
+      )
+      resetForm({ ...values })
+    } catch (error) {
+      resetForm({ ...values })
+      await this.setState(error)
+    }
+  }
 
   handleDelete () { }
 
   handleCancel () { }
 
   render () {
-    const { apiKey, applicationsRights, fetching, error } = this.props
-
-    if (fetching ) {
-      return <Spinner />
-    }
+    const { apiKey, rights, fetching, error } = this.props
 
     if (error) {
       return 'ERROR'
     }
 
-    const { rightsItems, rightsValues } = applicationsRights.reduce(
+    if (fetching || !apiKey) {
+      return <Spinner center />
+    }
+
+    const { rightsItems, rightsValues } = rights.reduce(
       function (acc, right) {
         acc.rightsItems.push(
           <Field
@@ -119,7 +164,7 @@ export default class ApplicationAccessEdit extends React.Component {
 
     const initialFormValues = {
       name: apiKey.name,
-      ...rightsValues,
+      rights: { ...rightsValues },
     }
 
     return (
@@ -148,8 +193,12 @@ export default class ApplicationAccessEdit extends React.Component {
                 name="name"
                 type="text"
               />
-              <Message component="h4" content={sharedMessages.rights} />
-              {rightsItems}
+              <FieldGroup
+                name="rights"
+                title={sharedMessages.rights}
+              >
+                {rightsItems}
+              </FieldGroup>
               <div className={style.submitBar}>
                 <div>
                   <Button type="submit" message={sharedMessages.saveChanges} />

@@ -77,6 +77,7 @@ export default {
     update: ttnClient.Applications.updateById,
     apiKeys: {
       list: ttnClient.Applications.ApiKeys.getAll,
+      update: ttnClient.Applications.ApiKeys.updateById,
     },
   },
   devices: {
